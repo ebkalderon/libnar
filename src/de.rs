@@ -52,9 +52,12 @@ impl<R: Read> Archive<R> {
         self.inner.reader.into_inner()
     }
 
-    pub fn entries(&mut self) -> io::Result<Entries> {
+    pub fn entries(&mut self) -> io::Result<Entries<R>> {
         let archive: &mut Archive<dyn Read> = self;
-        archive.entries_inner()
+        archive.entries_inner().map(|iter| Entries {
+            iter,
+            _marker: PhantomData
+        })
     }
 
     pub fn set_canonicalize_mtime(&mut self, canonicalize: bool) {
@@ -72,7 +75,7 @@ impl<R: Read> Archive<R> {
 }
 
 impl<'a> Archive<dyn Read + 'a> {
-    fn entries_inner(&mut self) -> io::Result<Entries> {
+    fn entries_inner(&mut self) -> io::Result<Box<dyn Iterator<Item = io::Result<Entry>> + '_>> {
         if self.inner.position.get() != 0 {
             let message = "Cannot call `entries` unless reader is in position 0";
             return Err(Error::new(ErrorKind::Other, message));
@@ -83,8 +86,7 @@ impl<'a> Archive<dyn Read + 'a> {
         }
 
         let gen = Gen::new(move |co| parse(co, self));
-        let iter = Box::new(gen.into_iter());
-        Ok(Entries(iter))
+        Ok(Box::new(gen.into_iter()))
     }
 
     fn unpack_inner(&mut self, dst: &Path) -> io::Result<()> {
@@ -225,17 +227,20 @@ async fn try_parse(
     Ok(())
 }
 
-pub struct Entries<'a>(Box<dyn Iterator<Item = io::Result<Entry<'a>>> + 'a>);
+pub struct Entries<'a, R: 'a + Read> {
+    iter: Box<dyn Iterator<Item = io::Result<Entry<'a>>> + 'a>,
+    _marker: PhantomData<&'a Archive<R>>,
+}
 
-impl<'a> Iterator for Entries<'a> {
+impl<'a, R: Read> Iterator for Entries<'a, R> {
     type Item = io::Result<Entry<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+        self.iter.next()
     }
 }
 
-impl<'a> Debug for Entries<'a> {
+impl<'a, R: Read> Debug for Entries<'a, R> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         write!(fmt, stringify!(Entries))
     }
