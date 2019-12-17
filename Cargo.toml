@@ -1,0 +1,12 @@
+[package]
+name = "libnar"
+version = "0.1.0"
+authors = ["Eyal Kalderon <ebkalderon@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+filetime = "0.2.8"
+genawaiter = "0.2.2"
+
+[target."cfg(unix)".dependencies]
+xattr = { version = "0.2.2", optional = true }
