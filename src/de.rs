@@ -31,7 +31,6 @@ impl<'a, R: ?Sized + Read> Read for &'a ArchiveInner<R> {
     }
 }
 
-#[derive(Debug)]
 pub struct Archive<R: ?Sized + Read> {
     inner: ArchiveInner<R>,
 }
@@ -121,6 +120,16 @@ impl<'a> Archive<dyn Read + 'a> {
         }
 
         Ok(data_buffer)
+    }
+}
+
+impl<'a, R: Read> Debug for Archive<R> {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        fmt.debug_struct(stringify!(Archive))
+            .field("canonicalize_mtime", &self.inner.canonicalize_mtime)
+            .field("remove_xattrs", &self.inner.remove_xattrs)
+            .field("position", &self.inner.position)
+            .finish()
     }
 }
 
