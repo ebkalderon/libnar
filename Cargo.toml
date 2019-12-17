@@ -3,6 +3,13 @@ name = "libnar"
 version = "0.1.0"
 authors = ["Eyal Kalderon <ebkalderon@gmail.com>"]
 edition = "2018"
+description = "NAR (Nix Archive) reader/writer implementation written in Rust"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/ebkalderon/libnar"
+repository = "https://github.com/ebkalderon/libnar"
+documentation = "https://docs.rs/libnar/"
+readme = "README.md"
+keywords = ["encoding", "archive", "nixos", "nix"]
 
 [dependencies]
 filetime = "0.2.8"
