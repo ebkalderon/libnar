@@ -17,3 +17,6 @@ genawaiter = "0.2.2"
 
 [target."cfg(unix)".dependencies]
 xattr = { version = "0.2.2", optional = true }
+
+[dev-dependencies]
+tempfile = "3.1.0"
