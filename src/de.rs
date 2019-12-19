@@ -315,6 +315,10 @@ impl<'a> Entry<'a> {
         self.canonicalize_mtime = canonicalize;
     }
 
+    pub fn set_remove_xattrs(&mut self, remove: bool) {
+        self.remove_xattrs = remove;
+    }
+
     pub fn unpack_in<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
         let path = if self.name.as_os_str().len() == 0 {
             dst.as_ref().to_owned()
