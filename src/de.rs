@@ -55,7 +55,7 @@ impl<R: Read> Archive<R> {
         let archive: &mut Archive<dyn Read> = self;
         archive.entries_inner().map(|iter| Entries {
             iter,
-            _marker: PhantomData
+            _marker: PhantomData,
         })
     }
 
