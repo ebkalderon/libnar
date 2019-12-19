@@ -17,7 +17,7 @@ where
     P: AsRef<Path>,
 {
     let target = path.as_ref();
-    if !target.exists() {
+    if fs::symlink_metadata(target).is_err() {
         return Err(Error::new(ErrorKind::NotFound, "Path not found"));
     }
 
@@ -26,10 +26,11 @@ where
 }
 
 fn encode_entry<W: Write>(writer: &mut W, path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(&path)?;
+
     write_padded(writer, b"(")?;
     write_padded(writer, b"type")?;
 
-    let metadata = fs::symlink_metadata(&path)?;
     if metadata.file_type().is_dir() {
         write_padded(writer, b"directory")?;
 

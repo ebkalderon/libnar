@@ -399,7 +399,7 @@ impl<'a> Entry<'a> {
     }
 
     fn unpack_symlink(dst: &Path, target: &Path) -> io::Result<()> {
-        if dst.exists() {
+        if fs::symlink_metadata(&dst).is_ok() {
             fs::remove_file(&dst)?;
         }
 
