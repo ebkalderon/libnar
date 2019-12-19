@@ -84,3 +84,47 @@ fn write_padded<W: Write>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::mem::size_of;
+
+    use super::*;
+
+    #[test]
+    fn writes_multiple_of_eight_exactly() {
+        let mut buffer = Vec::new();
+        let length = 16u64;
+        let data = vec![1u8; length as usize];
+        write_padded(&mut buffer, &data[..]).unwrap();
+
+        let written_data_len = size_of::<u64>() as u64 + length;
+        assert_eq!(buffer.len() as u64, written_data_len);
+
+        let header_bytes = length.to_le_bytes();
+        assert_eq!(&buffer[..size_of::<u64>()], header_bytes);
+
+        let data_bytes = [1u8; 16];
+        assert_eq!(&buffer[size_of::<u64>()..], data_bytes);
+    }
+
+    #[test]
+    fn pads_non_multiple_of_eight() {
+        let mut buffer = Vec::new();
+        let length = 5u64;
+        let data = vec![1u8; length as usize];
+        write_padded(&mut buffer, &data[..]).unwrap();
+
+        let written_data_len = size_of::<u64>() as u64 + length + 3;
+        assert_eq!(buffer.len() as u64, written_data_len);
+
+        let header_bytes = length.to_le_bytes();
+        assert_eq!(&buffer[..size_of::<u64>()], header_bytes);
+
+        let data_bytes = [1u8; 5];
+        assert_eq!(&buffer[size_of::<u64>()..size_of::<u64>() + 5], data_bytes);
+
+        let padding_bytes = [0u8; 3];
+        assert_eq!(&buffer[size_of::<u64>() + 5..], padding_bytes);
+    }
+}
