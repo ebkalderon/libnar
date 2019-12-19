@@ -390,8 +390,12 @@ impl<'a> Entry<'a> {
     }
 
     fn unpack_file(dst: &Path, executable: bool, data: &mut Vec<u8>) -> io::Result<()> {
+        if dst.exists() {
+            fs::remove_file(&dst)?;
+        }
+
         let mut opt = OpenOptions::new();
-        opt.create(true).write(true);
+        opt.create_new(true).write(true);
 
         if executable {
             opt.mode(0o555);
