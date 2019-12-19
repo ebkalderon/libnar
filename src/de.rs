@@ -394,7 +394,9 @@ impl<'a> Entry<'a> {
         opt.create(true).write(true);
 
         if executable {
-            opt.mode(0o744);
+            opt.mode(0o555);
+        } else {
+            opt.mode(0o444);
         }
 
         let mut file = opt.open(&dst)?;
