@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 #[doc(inline)]
 pub use self::de::Archive;
 #[doc(inline)]
