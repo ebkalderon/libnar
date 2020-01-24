@@ -26,7 +26,7 @@ where
 }
 
 fn encode_entry<W: Write>(writer: &mut W, path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(&path)?;
+    let metadata = fs::symlink_metadata(path)?;
 
     write_padded(writer, b"(")?;
     write_padded(writer, b"type")?;
