@@ -12,11 +12,11 @@ readme = "README.md"
 keywords = ["encoding", "archive", "nixos", "nix"]
 
 [dependencies]
-filetime = "0.2.8"
-genawaiter = "0.2.2"
+filetime = "0.2"
+genawaiter = "0.2"
 
 [target."cfg(unix)".dependencies]
-xattr = { version = "0.2.2", optional = true }
+xattr = { version = "0.2", optional = true }
 
 [dev-dependencies]
-tempfile = "3.1.0"
+tempfile = "3.1"
