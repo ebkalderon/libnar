@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{self, Error, ErrorKind, Write};
+use std::io::{self, Error, ErrorKind, Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -56,7 +56,7 @@ fn encode_entry<W: Write>(writer: &mut W, path: &Path) -> io::Result<()> {
 
         write_padded(writer, b"contents")?;
         let mut file = File::open(path)?;
-        write_padded_file(writer, &mut file, metadata.len())?;
+        write_padded_from_reader(writer, &mut file, metadata.len())?;
     } else if metadata.file_type().is_symlink() {
         write_padded(writer, b"symlink")?;
         write_padded(writer, b"target")?;
@@ -86,9 +86,13 @@ fn write_padded<W: Write>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn write_padded_file<W: Write>(writer: &mut W, file: &mut File, len: u64) -> io::Result<()> {
+fn write_padded_from_reader<W, R>(writer: &mut W, reader: &mut R, len: u64) -> io::Result<()>
+where
+    W: Write,
+    R: Read,
+{
     writer.write_all(&len.to_le_bytes())?;
-    io::copy(file, writer)?;
+    io::copy(reader, writer)?;
 
     let remainder = len as usize % PAD_LEN;
     if remainder > 0 {
