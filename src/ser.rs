@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Error, ErrorKind, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
@@ -17,7 +17,7 @@ where
     P: AsRef<Path>,
 {
     let target = path.as_ref();
-    if fs::symlink_metadata(target).is_err() {
+    if !fs::symlink_metadata(target).is_ok() {
         return Err(Error::new(ErrorKind::NotFound, "Path not found"));
     }
 
@@ -55,8 +55,8 @@ fn encode_entry<W: Write>(writer: &mut W, path: &Path) -> io::Result<()> {
         }
 
         write_padded(writer, b"contents")?;
-        let file = fs::read(path)?;
-        write_padded(writer, &file)?;
+        let mut file = File::open(path)?;
+        write_padded_file(writer, &mut file, metadata.len())?;
     } else if metadata.file_type().is_symlink() {
         write_padded(writer, b"symlink")?;
         write_padded(writer, b"target")?;
@@ -77,6 +77,20 @@ fn write_padded<W: Write>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
     writer.write_all(bytes)?;
 
     let remainder = bytes.len() % PAD_LEN;
+    if remainder > 0 {
+        let buf = [0u8; PAD_LEN];
+        let padding = PAD_LEN - remainder;
+        writer.write_all(&buf[..padding])?;
+    }
+
+    Ok(())
+}
+
+fn write_padded_file<W: Write>(writer: &mut W, file: &mut File, len: u64) -> io::Result<()> {
+    writer.write_all(&len.to_le_bytes())?;
+    io::copy(file, writer)?;
+
+    let remainder = len as usize % PAD_LEN;
     if remainder > 0 {
         let buf = [0u8; PAD_LEN];
         let padding = PAD_LEN - remainder;
