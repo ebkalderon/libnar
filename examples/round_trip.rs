@@ -3,10 +3,10 @@ use std::path::Path;
 
 use libnar::Archive;
 
-const TARGET_PATH: &str = env!("CARGO_MANIFEST_DIR");
+const TARGET_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
 
 fn main() {
-    let nar = Path::new(TARGET_PATH).join("libnar").with_extension("nar");
+    let nar = Path::new(env!("CARGO_MANIFEST_DIR")).join("libnar.nar");
 
     let mut file = File::create(&nar).unwrap();
     libnar::to_writer(&mut file, TARGET_PATH).unwrap();
