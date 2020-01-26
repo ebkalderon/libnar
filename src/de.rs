@@ -204,11 +204,16 @@ async fn try_parse(
                 match archive.read_utf8_padded()?.as_str() {
                     "entry" => {
                         if archive.read_utf8_padded()? != "(" {
-                            return Err(Error::new(ErrorKind::Other, "Missing open tag"));
+                            return Err(Error::new(ErrorKind::Other, "Missing nested open tag"));
                         }
 
-                        let entry_path = if archive.read_utf8_padded()? == "name" {
-                            archive.read_utf8_padded().map(PathBuf::from)?
+                        let entry_name = if archive.read_utf8_padded()? == "name" {
+                            let name = archive.read_utf8_padded().map(PathBuf::from)?;
+                            if name.is_empty() {
+                                return Err(Error::new(ErrorKind::Other, "Entry name is empty"));
+                            } else {
+                                name
+                            }
                         } else {
                             return Err(Error::new(ErrorKind::Other, "Missing name field"));
                         };
@@ -217,9 +222,9 @@ async fn try_parse(
                             return Err(Error::new(ErrorKind::Other, "Missing node field"));
                         }
 
-                        let recurse: Pin<Box<dyn Future<Output = _>>> =
-                            Box::pin(try_parse(co, archive, path.join(entry_path)));
-                        recurse.await?;
+                        let child_entry: Pin<Box<dyn Future<Output = _>>> =
+                            Box::pin(try_parse(co, archive, path.join(entry_name)));
+                        child_entry.await?;
 
                         if archive.read_utf8_padded()? != ")" {
                             return Err(Error::new(ErrorKind::Other, "Missing nested close tag"));
