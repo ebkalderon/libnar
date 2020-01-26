@@ -209,10 +209,20 @@ async fn try_parse(
 
                         let entry_name = if archive.read_utf8_padded()? == "name" {
                             let name = archive.read_utf8_padded().map(PathBuf::from)?;
-                            if name.is_empty() {
-                                return Err(Error::new(ErrorKind::Other, "Entry name is empty"));
-                            } else {
-                                name
+                            match name.as_str() {
+                                "" => {
+                                    return Err(Error::new(ErrorKind::Other, "Entry name is empty"))
+                                }
+                                "/" => {
+                                    return Err(Error::new(ErrorKind::Other, "Invalid name `/`"))
+                                }
+                                "." => {
+                                    return Err(Error::new(ErrorKind::Other, "Invalid name `.`"))
+                                }
+                                ".." => {
+                                    return Err(Error::new(ErrorKind::Other, "Invalid name `..`"))
+                                }
+                                _ => name,
                             }
                         } else {
                             return Err(Error::new(ErrorKind::Other, "Missing name field"));
