@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt::{self, Debug, Formatter};
 use std::fs::{self, OpenOptions};
 use std::future::Future;
-use std::io::{self, Cursor, Error, ErrorKind, Read};
+use std::io::{self, Error, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -422,7 +422,7 @@ impl<'a> Entry<'a> {
         }
 
         let mut file = opt.open(&dst)?;
-        io::copy(&mut Cursor::new(data), &mut file)?;
+        file.write_all(data.as_slice())?;
         Ok(())
     }
 
