@@ -338,7 +338,7 @@ impl<'a> Entry<'a> {
     }
 
     pub fn unpack_in<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
-        let path = if self.name.as_os_str().len() == 0 {
+        let path = if self.name.as_os_str().is_empty() {
             dst.as_ref().to_owned()
         } else {
             dst.as_ref().join(&self.name)

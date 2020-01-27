@@ -17,7 +17,7 @@ where
     P: AsRef<Path>,
 {
     let target = path.as_ref();
-    if !fs::symlink_metadata(target).is_ok() {
+    if fs::symlink_metadata(target).is_err() {
         return Err(Error::new(ErrorKind::NotFound, "Path not found"));
     }
 
