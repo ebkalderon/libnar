@@ -94,7 +94,7 @@ where
     writer.write_all(&len.to_le_bytes())?;
     io::copy(reader, writer)?;
 
-    let remainder = len as usize % PAD_LEN;
+    let remainder = (len % PAD_LEN as u64) as usize;
     if remainder > 0 {
         let buf = [0u8; PAD_LEN];
         let padding = PAD_LEN - remainder;
