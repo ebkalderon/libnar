@@ -208,7 +208,7 @@ async fn try_parse(
                         }
 
                         let entry_name = if archive.read_utf8_padded()? == "name" {
-                            let name = archive.read_utf8_padded().map(PathBuf::from)?;
+                            let name = archive.read_utf8_padded()?;
                             match name.as_str() {
                                 "" => {
                                     return Err(Error::new(ErrorKind::Other, "Entry name is empty"))
