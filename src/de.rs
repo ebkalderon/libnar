@@ -216,6 +216,9 @@ async fn try_parse(
                                 "/" => {
                                     return Err(Error::new(ErrorKind::Other, "Invalid name `/`"))
                                 }
+                                "~" => {
+                                    return Err(Error::new(ErrorKind::Other, "Invalid name `~`"))
+                                }
                                 "." => {
                                     return Err(Error::new(ErrorKind::Other, "Invalid name `.`"))
                                 }
