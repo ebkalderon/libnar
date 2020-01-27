@@ -7,13 +7,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-## [0.1.0] - 2019-09-02
+## [0.1.0] - 2020-01-27
 
 ### Added
 
 * Initial crate release.
-* Implement serialization via `de::to_vec()`, `de::to_writer()`.
-* Implement deserialization via `ser::Archive`.
+* Implement serialization via `ser::to_vec()`, `ser::to_writer()`.
+* Implement deserialization via `de::Archive`.
 
-[Unreleased]: https://github.com/ebkalderon/tower-lsp/compare/v0.5.0...HEAD
-[0.1.0]: https://github.com/ebkalderon/tower-lsp/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ebkalderon/libnar/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ebkalderon/libnar/releases/tag/v0.1.0
