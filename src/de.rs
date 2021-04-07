@@ -383,22 +383,18 @@ impl<'a> Entry<'a> {
         })
     }
 
-    fn unpack_file(dst: &Path, executable: bool, data: &mut Vec<u8>) -> io::Result<()> {
+    fn unpack_file(dst: &Path, executable: bool, data: &[u8]) -> io::Result<()> {
         if dst.exists() {
             fs::remove_file(&dst)?;
         }
 
-        let mut opt = OpenOptions::new();
-        opt.create_new(true).write(true);
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(if executable { 0o555 } else { 0o444 })
+            .open(&dst)?;
 
-        if executable {
-            opt.mode(0o555);
-        } else {
-            opt.mode(0o444);
-        }
-
-        let mut file = opt.open(&dst)?;
-        file.write_all(data.as_slice())?;
+        file.write_all(data)?;
         Ok(())
     }
 
