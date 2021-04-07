@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Formatter};
 use std::fs::{self, OpenOptions};
 use std::future::Future;
-use std::io::{self, Error, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -11,8 +11,6 @@ use filetime::FileTime;
 use genawaiter::sync::Gen;
 
 use crate::{NIX_VERSION_MAGIC, PAD_LEN};
-
-type Co<'a> = genawaiter::sync::Co<io::Result<Entry<'a>>>;
 
 #[derive(Debug)]
 struct ArchiveInner<R: ?Sized> {
@@ -27,6 +25,139 @@ impl<R: ?Sized + Read> Read for ArchiveInner<R> {
         Ok(bytes_read)
     }
 }
+
+#[derive(Debug)]
+pub struct UnknownTag;
+
+macro_rules! define_tags {
+    ($($sym:ident => $str:expr),* $(,)?) => {
+        #[derive(Copy, Clone, Debug)]
+        #[non_exhaustive]
+        pub enum Tag {
+            $($sym),*
+        }
+
+        impl Tag {
+            pub fn into_str(self) -> &'static str {
+                match self {
+                    $(Tag::$sym => $str,)*
+                }
+            }
+        }
+
+        impl std::str::FromStr for Tag {
+            type Err = UnknownTag;
+
+            fn from_str(s: &str) -> std::result::Result<Tag, UnknownTag> {
+                Ok(match s {
+                    $($str => Tag::$sym,)*
+                    _ => return Err(UnknownTag),
+                })
+            }
+        }
+    }
+}
+
+define_tags! {
+    Empty => "",
+    Open => "(",
+    Close => ")",
+    Type => "type",
+
+    Regular => "regular",
+    Symlink => "symlink",
+    Directory => "directory",
+    Entry => "entry",
+
+    Contents => "contents",
+    Executable => "executable",
+    Target => "target",
+    Name => "name",
+    Node => "node",
+}
+
+impl fmt::Display for Tag {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.into_str())
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    GetEntriesAfterRead,
+    InvalidMagic,
+    BadPadding,
+    MissingTag(Tag),
+    InvalidTag(Tag),
+    InvalidDirEntryName(&'static str),
+    InvalidDirEntryChar(char),
+    InvalidDirEntry,
+    UnknownFileType(String),
+
+    InvalidPathComponent {
+        path: PathBuf,
+    },
+    Io(io::Error),
+    IoAt {
+        inner: io::Error,
+        path: PathBuf,
+    },
+    Utf8(std::string::FromUtf8Error),
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io(e) => Some(e),
+            Error::IoAt { inner, .. } => Some(inner),
+            Error::Utf8(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(x: io::Error) -> Error {
+        Error::Io(x)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(x: std::string::FromUtf8Error) -> Error {
+        Error::Utf8(x)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use Error as E;
+        match self {
+            E::GetEntriesAfterRead => {
+                write!(f, "Cannot call `entries` unless reader is in position 0")
+            }
+            E::InvalidMagic => write!(f, "Not a valid NAR archive"),
+            E::BadPadding => write!(f, "Bad archive padding"),
+            E::MissingTag(t) => write!(f, "Missing `{}` tag", t),
+            E::InvalidTag(t) => write!(f, "Invalid `{}` tag", t),
+
+            E::InvalidDirEntryName("") => write!(f, "Entry name is empty"),
+            E::InvalidDirEntryName(n) => write!(f, "Invalid name `{}`", n),
+            E::InvalidDirEntryChar(c) => write!(f, "Invalid character in entry name: `{}`", c),
+            E::InvalidDirEntry => write!(f, "Invalid directory entry"),
+
+            E::UnknownFileType(ft) => write!(f, "Unrecognized file type `{}`", ft),
+
+            E::InvalidPathComponent { path } => write!(f, "Invalid path component in {}", path.display()),
+            E::Io(e) => write!(f, "I/O error: {}", e),
+            E::IoAt { inner, path } => write!(f, "I/O error: {}; while handling: {}", inner, path.display()),
+            E::Utf8(e) => write!(f, "Utf8 error: {}", e),
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+type Co<'a> = genawaiter::sync::Co<Result<Entry<'a>>>;
 
 pub struct Archive<R: ?Sized> {
     canonicalize_mtime: bool,
@@ -50,7 +181,7 @@ impl<R: Read> Archive<R> {
         self.inner.reader
     }
 
-    pub fn entries(&mut self) -> io::Result<impl Iterator<Item = io::Result<Entry>> + '_> {
+    pub fn entries(&mut self) -> Result<impl Iterator<Item = Result<Entry>> + '_> {
         let archive: &mut Archive<dyn Read> = self;
         archive.entries_inner()
     }
@@ -63,27 +194,24 @@ impl<R: Read> Archive<R> {
         self.remove_xattrs = remove;
     }
 
-    pub fn unpack<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
+    pub fn unpack<P: AsRef<Path>>(&mut self, dst: P) -> Result<()> {
         let archive: &mut Archive<dyn Read> = self;
         archive.unpack_inner(dst.as_ref())
     }
 }
 
 impl<'a> Archive<dyn Read + 'a> {
-    fn entries_inner(&mut self) -> io::Result<impl Iterator<Item = io::Result<Entry>> + '_> {
+    fn entries_inner(&mut self) -> Result<impl Iterator<Item = Result<Entry>> + '_> {
         if self.inner.position != 0 {
-            let message = "Cannot call `entries` unless reader is in position 0";
-            return Err(Error::new(ErrorKind::Other, message));
+            Err(Error::GetEntriesAfterRead)
+        } else if self.read_bytes_padded()? != NIX_VERSION_MAGIC {
+            Err(Error::InvalidMagic)
+        } else {
+            Ok(Gen::new(move |co| parse(co, self)).into_iter())
         }
-
-        if self.read_bytes_padded()? != NIX_VERSION_MAGIC {
-            return Err(Error::new(ErrorKind::Other, "Not a valid NAR archive"));
-        }
-
-        Ok(Gen::new(move |co| parse(co, self)).into_iter())
     }
 
-    fn unpack_inner(&mut self, dst: &Path) -> io::Result<()> {
+    fn unpack_inner(&mut self, dst: &Path) -> Result<()> {
         for entry in self.entries_inner()? {
             let mut file = entry?;
             file.unpack_in(dst)?;
@@ -91,12 +219,12 @@ impl<'a> Archive<dyn Read + 'a> {
         Ok(())
     }
 
-    fn read_utf8_padded(&mut self) -> io::Result<String> {
+    fn read_utf8_padded(&mut self) -> Result<String> {
         let bytes = self.read_bytes_padded()?;
-        String::from_utf8(bytes).map_err(|e| Error::new(ErrorKind::InvalidData, e))
+        Ok(String::from_utf8(bytes)?)
     }
 
-    fn read_bytes_padded(&mut self) -> io::Result<Vec<u8>> {
+    fn read_bytes_padded(&mut self) -> Result<Vec<u8>> {
         let mut len_buffer = [0u8; PAD_LEN];
         self.inner.read_exact(&mut len_buffer[..])?;
         let len = u64::from_le_bytes(len_buffer);
@@ -110,11 +238,19 @@ impl<'a> Archive<dyn Read + 'a> {
             let padding = &mut buffer[0..PAD_LEN - remainder];
             self.inner.read_exact(padding)?;
             if !buffer.iter().all(|b| *b == 0) {
-                return Err(Error::new(ErrorKind::Other, "Bad archive padding"));
+                return Err(Error::BadPadding);
             }
         }
 
         Ok(data_buffer)
+    }
+
+    fn expect_tag(&mut self, tag: Tag) -> Result<()> {
+        if self.read_utf8_padded()? == tag.into_str() {
+            Ok(())
+        } else {
+            Err(Error::MissingTag(tag))
+        }
     }
 }
 
@@ -134,41 +270,59 @@ async fn parse(mut co: Co<'_>, archive: &mut Archive<dyn Read + '_>) {
     }
 }
 
+#[derive(Default)]
+struct LookAhead(std::collections::VecDeque<String>);
+
+impl LookAhead {
+    pub fn fetch_from(&mut self, archive: &mut Archive<dyn Read + '_>) -> Result<()> {
+        self.0.push_back(archive.read_utf8_padded()?);
+        Ok(())
+    }
+
+    pub fn expect_tag(&mut self, tag: Tag) -> Result<()> {
+        if self.eat_tag(tag) {
+            Ok(())
+        } else {
+            Err(Error::MissingTag(tag))
+        }
+    }
+
+    pub fn eat_tag(&mut self, tag: Tag) -> bool {
+        let ret = self.0.front().map(|x| x.as_str()) == Some(tag.into_str());
+        if ret {
+            self.0.pop_front();
+        }
+        ret
+    }
+}
+
 async fn try_parse(
     co: &mut Co<'_>,
-    archive: &mut Archive<dyn Read + '_>,
+    mut archive: &mut Archive<dyn Read + '_>,
     path: PathBuf,
-) -> io::Result<()> {
-    if archive.read_utf8_padded()? != "(" {
-        return Err(Error::new(ErrorKind::Other, "Missing open tag"));
-    }
+) -> Result<()> {
+    archive.expect_tag(Tag::Open)?;
+    archive.expect_tag(Tag::Type)?;
 
-    if archive.read_utf8_padded()? != "type" {
-        return Err(Error::new(ErrorKind::Other, "Missing type tag"));
-    }
-
-    match archive.read_utf8_padded()?.as_str() {
+    let ft = archive.read_utf8_padded()?;
+    match ft.as_str() {
         "regular" => {
             let mut executable = false;
-            let mut tag = archive.read_utf8_padded()?;
+            let mut la: LookAhead = Default::default();
+            la.fetch_from(&mut archive)?;
 
-            if tag == "executable" {
+            if la.eat_tag(Tag::Executable) {
                 executable = true;
-                if archive.read_utf8_padded()? != "" {
-                    return Err(Error::new(ErrorKind::Other, "Incorrect executable tag"));
+                if archive.expect_tag(Tag::Empty).is_err() {
+                    return Err(Error::InvalidTag(Tag::Executable));
                 }
-                tag = archive.read_utf8_padded()?;
+                la.fetch_from(&mut archive)?;
             }
 
-            let data = if tag == "contents" {
-                archive.read_bytes_padded()?
-            } else {
-                return Err(Error::new(ErrorKind::Other, "Missing contents tag"));
-            };
+            la.expect_tag(Tag::Contents)?;
+            let data = archive.read_bytes_padded()?;
 
-            if archive.read_utf8_padded()? != ")" {
-                return Err(Error::new(ErrorKind::Other, "Missing regular close tag"));
-            }
+            archive.expect_tag(Tag::Close)?;
 
             co.yield_(Ok(Entry::new(
                 path,
@@ -178,15 +332,9 @@ async fn try_parse(
             .await;
         }
         "symlink" => {
-            let target = if archive.read_utf8_padded()? == "target" {
-                archive.read_utf8_padded().map(PathBuf::from)?
-            } else {
-                return Err(Error::new(ErrorKind::Other, "Missing target tag"));
-            };
-
-            if archive.read_utf8_padded()? != ")" {
-                return Err(Error::new(ErrorKind::Other, "Missing symlink close tag"));
-            }
+            archive.expect_tag(Tag::Target)?;
+            let target: PathBuf = archive.read_utf8_padded()?.into();
+            archive.expect_tag(Tag::Close)?;
 
             co.yield_(Ok(Entry::new(path, EntryKind::Symlink { target }, archive)))
                 .await;
@@ -198,52 +346,35 @@ async fn try_parse(
             loop {
                 match archive.read_utf8_padded()?.as_str() {
                     "entry" => {
-                        if archive.read_utf8_padded()? != "(" {
-                            return Err(Error::new(ErrorKind::Other, "Missing nested open tag"));
-                        }
+                        archive.expect_tag(Tag::Open)?;
+                        archive.expect_tag(Tag::Name)?;
 
-                        let entry_name = if archive.read_utf8_padded()? == "name" {
-                            let name = archive.read_utf8_padded()?;
-                            match name.as_str() {
-                                "" => {
-                                    return Err(Error::new(ErrorKind::Other, "Entry name is empty"))
-                                }
-                                "/" => {
-                                    return Err(Error::new(ErrorKind::Other, "Invalid name `/`"))
-                                }
-                                "~" => {
-                                    return Err(Error::new(ErrorKind::Other, "Invalid name `~`"))
-                                }
-                                "." => {
-                                    return Err(Error::new(ErrorKind::Other, "Invalid name `.`"))
-                                }
-                                ".." => {
-                                    return Err(Error::new(ErrorKind::Other, "Invalid name `..`"))
-                                }
-                                _ => name,
+                        let entry_name = archive.read_utf8_padded()?;
+                        match entry_name.as_str() {
+                            "" => return Err(Error::InvalidDirEntryName("")),
+                            "~" => return Err(Error::InvalidDirEntryName("~")),
+                            "." => return Err(Error::InvalidDirEntryName(".")),
+                            ".." => return Err(Error::InvalidDirEntryName("..")),
+                            _ if entry_name.contains('/') => {
+                                return Err(Error::InvalidDirEntryChar('/'))
                             }
-                        } else {
-                            return Err(Error::new(ErrorKind::Other, "Missing name field"));
+                            _ => {}
                         };
 
-                        if archive.read_utf8_padded()? != "node" {
-                            return Err(Error::new(ErrorKind::Other, "Missing node field"));
-                        }
+                        archive.expect_tag(Tag::Node)?;
 
                         let child_entry: Pin<Box<dyn Future<Output = _>>> =
                             Box::pin(try_parse(co, archive, path.join(entry_name)));
                         child_entry.await?;
 
-                        if archive.read_utf8_padded()? != ")" {
-                            return Err(Error::new(ErrorKind::Other, "Missing nested close tag"));
-                        }
+                        archive.expect_tag(Tag::Close)?;
                     }
                     ")" => break,
-                    _ => return Err(Error::new(ErrorKind::Other, "Incorrect directory field")),
+                    _ => return Err(Error::InvalidDirEntry),
                 }
             }
         }
-        _ => return Err(Error::new(ErrorKind::Other, "Unrecognized file type")),
+        _ => return Err(Error::UnknownFileType(ft)),
     }
 
     Ok(())
@@ -313,17 +444,19 @@ impl<'a> Entry<'a> {
         self.remove_xattrs = remove;
     }
 
-    pub fn unpack_in<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
+    pub fn unpack_in<P: AsRef<Path>>(&mut self, dst: P) -> Result<()> {
+        let dst = dst.as_ref();
         let path = if self.name.as_os_str().is_empty() {
-            dst.as_ref().to_owned()
+            dst.to_owned()
         } else {
-            dst.as_ref().join(&self.name)
+            dst.join(&self.name)
         };
 
         for component in path.components() {
-            if let Component::Prefix(_) | Component::RootDir | Component::ParentDir = component {
-                let message = format!("Invalid path component in {:?}", path);
-                return Err(Error::new(ErrorKind::Other, message));
+            if matches!(component, Component::Prefix(_) | Component::RootDir | Component::ParentDir) {
+                return Err(Error::InvalidPathComponent {
+                    path,
+                });
             }
         }
 
@@ -340,10 +473,10 @@ impl<'a> Entry<'a> {
             });
 
         match &mut self.kind {
-            EntryKind::Directory => Self::unpack_dir(&path)?,
-            EntryKind::Regular { executable, data } => Self::unpack_file(&path, *executable, data)?,
-            EntryKind::Symlink { target } => Self::unpack_symlink(&path, target)?,
-        }
+            EntryKind::Directory => Self::unpack_dir(&path),
+            EntryKind::Regular { executable, data } => Self::unpack_file(&path, *executable, data),
+            EntryKind::Symlink { target } => Self::unpack_symlink(&path, target),
+        }.map_err(|inner| Error::IoAt { inner, path: path.clone() })?;
 
         if self.remove_xattrs {
             #[cfg(all(unix, feature = "xattr"))]
@@ -376,10 +509,7 @@ impl<'a> Entry<'a> {
                     return Ok(());
                 }
             }
-            Err(Error::new(
-                err.kind(),
-                format!("{} when creating dir {}", err, dst.display()),
-            ))
+            Err(err)
         })
     }
 
@@ -420,6 +550,16 @@ enum EntryKind {
     Directory,
     Regular { executable: bool, data: Vec<u8> },
     Symlink { target: PathBuf },
+}
+
+impl From<EntryKind> for Tag {
+    fn from(ek: EntryKind) -> Tag {
+        match ek {
+            EntryKind::Directory => Tag::Directory,
+            EntryKind::Regular { .. } => Tag::Regular,
+            EntryKind::Symlink { .. } => Tag::Symlink,
+        }
+    }
 }
 
 impl Debug for EntryKind {
