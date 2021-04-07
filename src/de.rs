@@ -271,11 +271,12 @@ async fn parse(mut co: Co<'_>, archive: &mut Archive<dyn Read + '_>) {
 }
 
 #[derive(Default)]
-struct LookAhead(std::collections::VecDeque<String>);
+struct LookAhead(Option<String>);
 
 impl LookAhead {
     pub fn fetch_from(&mut self, archive: &mut Archive<dyn Read + '_>) -> Result<()> {
-        self.0.push_back(archive.read_utf8_padded()?);
+        assert_eq!(self.0, None);
+        self.0 = Some(archive.read_utf8_padded()?);
         Ok(())
     }
 
@@ -288,11 +289,13 @@ impl LookAhead {
     }
 
     pub fn eat_tag(&mut self, tag: Tag) -> bool {
-        let ret = self.0.front().map(|x| x.as_str()) == Some(tag.into_str());
-        if ret {
-            self.0.pop_front();
+        if let Some(x) = self.0.take() {
+            if x == tag.into_str() {
+                return true;
+            }
+            self.0 = Some(x);
         }
-        ret
+        false
     }
 }
 
