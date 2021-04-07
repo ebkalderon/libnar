@@ -50,12 +50,11 @@ fn main() {
 ```rust
 use std::fs::File;
 
-use libnar::Archive;
+use libnar::de::Parameters;
 
 fn main() {
     let file = File::open("/path/to/archive.nar").unwrap();
-    let mut nar = Archive::new(file).unwrap();
-    nar.unpack("./archive").unwrap();
+    Parameters::new().unpack(file, "./archive").unwrap();
 }
 ```
 

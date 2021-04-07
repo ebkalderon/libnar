@@ -2,7 +2,6 @@ use std::fmt::{self, Debug, Formatter};
 use std::fs::{self, OpenOptions};
 use std::future::Future;
 use std::io::{self, ErrorKind, Read, Write};
-use std::marker::PhantomData;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
@@ -23,6 +22,42 @@ impl<R: ?Sized + Read> Read for ArchiveInner<R> {
         let bytes_read = self.reader.read(buf)?;
         self.position += bytes_read as u64;
         Ok(bytes_read)
+    }
+}
+
+impl<R: ?Sized + Read> ArchiveInner<R> {
+    fn read_utf8_padded(&mut self) -> Result<String> {
+        let bytes = self.read_bytes_padded()?;
+        Ok(String::from_utf8(bytes)?)
+    }
+
+    fn read_bytes_padded(&mut self) -> Result<Vec<u8>> {
+        let mut len_buffer = [0u8; PAD_LEN];
+        self.read_exact(&mut len_buffer[..])?;
+        let len = u64::from_le_bytes(len_buffer);
+
+        let mut data_buffer = vec![0u8; len as usize];
+        self.read_exact(&mut data_buffer)?;
+
+        let remainder = data_buffer.len() % PAD_LEN;
+        if remainder > 0 {
+            let mut buffer = [0u8; PAD_LEN];
+            let padding = &mut buffer[0..PAD_LEN - remainder];
+            self.read_exact(padding)?;
+            if !buffer.iter().all(|b| *b == 0) {
+                return Err(Error::BadPadding);
+            }
+        }
+
+        Ok(data_buffer)
+    }
+
+    fn expect_tag(&mut self, tag: Tag) -> Result<()> {
+        if self.read_utf8_padded()? == tag.into_str() {
+            Ok(())
+        } else {
+            Err(Error::MissingTag(tag))
+        }
     }
 }
 
@@ -85,7 +120,6 @@ impl fmt::Display for Tag {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
-    GetEntriesAfterRead,
     InvalidMagic,
     BadPadding,
     MissingTag(Tag),
@@ -118,12 +152,14 @@ impl std::error::Error for Error {
 }
 
 impl From<io::Error> for Error {
+    #[inline]
     fn from(x: io::Error) -> Error {
         Error::Io(x)
     }
 }
 
 impl From<std::string::FromUtf8Error> for Error {
+    #[inline]
     fn from(x: std::string::FromUtf8Error) -> Error {
         Error::Utf8(x)
     }
@@ -133,9 +169,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use Error as E;
         match self {
-            E::GetEntriesAfterRead => {
-                write!(f, "Cannot call `entries` unless reader is in position 0")
-            }
             E::InvalidMagic => write!(f, "Not a valid NAR archive"),
             E::BadPadding => write!(f, "Bad archive padding"),
             E::MissingTag(t) => write!(f, "Missing `{}` tag", t),
@@ -157,116 +190,55 @@ impl fmt::Display for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-type Co<'a> = genawaiter::sync::Co<Result<Entry<'a>>>;
+type Co = genawaiter::sync::Co<Result<Entry>>;
 
-pub struct Archive<R: ?Sized> {
-    canonicalize_mtime: bool,
-    remove_xattrs: bool,
-    inner: ArchiveInner<R>,
+#[derive(Copy, Clone, Debug)]
+pub struct Parameters {
+    pub canonicalize_mtime: bool,
+    pub remove_xattrs: bool,
 }
 
-impl<R: Read> Archive<R> {
-    pub fn new(reader: R) -> Self {
-        Archive {
+impl Default for Parameters {
+    #[inline]
+    fn default() -> Self {
+        Self {
             canonicalize_mtime: true,
             remove_xattrs: true,
-            inner: ArchiveInner {
-                position: 0,
-                reader,
-            },
         }
-    }
-
-    pub fn into_inner(self) -> R {
-        self.inner.reader
-    }
-
-    pub fn entries(&mut self) -> Result<impl Iterator<Item = Result<Entry>> + '_> {
-        let archive: &mut Archive<dyn Read> = self;
-        archive.entries_inner()
-    }
-
-    pub fn set_canonicalize_mtime(&mut self, canonicalize: bool) {
-        self.canonicalize_mtime = canonicalize;
-    }
-
-    pub fn set_remove_xattrs(&mut self, remove: bool) {
-        self.remove_xattrs = remove;
-    }
-
-    pub fn unpack<P: AsRef<Path>>(&mut self, dst: P) -> Result<()> {
-        let archive: &mut Archive<dyn Read> = self;
-        archive.unpack_inner(dst.as_ref())
     }
 }
 
-impl<'a> Archive<dyn Read + 'a> {
-    fn entries_inner(&mut self) -> Result<impl Iterator<Item = Result<Entry>> + '_> {
-        if self.inner.position != 0 {
-            Err(Error::GetEntriesAfterRead)
-        } else if self.read_bytes_padded()? != NIX_VERSION_MAGIC {
-            Err(Error::InvalidMagic)
-        } else {
-            Ok(Gen::new(move |co| parse(co, self)).into_iter())
+impl Parameters {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    async fn parse_all<'a, R: Read + 'a>(self, mut co: Co, mut reader: ArchiveInner<R>) {
+        if let Err(err) = try_parse(&mut co, self, &mut reader, PathBuf::new()).await {
+            co.yield_(Err(err)).await;
         }
     }
 
-    fn unpack_inner(&mut self, dst: &Path) -> Result<()> {
-        for entry in self.entries_inner()? {
+    pub fn entries<'a, R: Read + 'a>(self, reader: R) -> Result<impl Iterator<Item = Result<Entry>> + 'a> {
+        let mut reader = ArchiveInner {
+            position: 0,
+            reader,
+        };
+        if ((&mut reader) as &mut ArchiveInner<dyn Read + 'a>).read_bytes_padded()? != NIX_VERSION_MAGIC {
+            Err(Error::InvalidMagic)
+        } else {
+            Ok(Gen::new(move |co| self.parse_all(co, reader)).into_iter())
+        }
+    }
+
+    pub fn unpack<R: Read, P: AsRef<Path>>(self, reader: R, dst: P) -> Result<()> {
+        let dst = dst.as_ref();
+        for entry in self.entries(reader)? {
             let mut file = entry?;
             file.unpack_in(dst)?;
         }
         Ok(())
-    }
-
-    fn read_utf8_padded(&mut self) -> Result<String> {
-        let bytes = self.read_bytes_padded()?;
-        Ok(String::from_utf8(bytes)?)
-    }
-
-    fn read_bytes_padded(&mut self) -> Result<Vec<u8>> {
-        let mut len_buffer = [0u8; PAD_LEN];
-        self.inner.read_exact(&mut len_buffer[..])?;
-        let len = u64::from_le_bytes(len_buffer);
-
-        let mut data_buffer = vec![0u8; len as usize];
-        self.inner.read_exact(&mut data_buffer)?;
-
-        let remainder = data_buffer.len() % PAD_LEN;
-        if remainder > 0 {
-            let mut buffer = [0u8; PAD_LEN];
-            let padding = &mut buffer[0..PAD_LEN - remainder];
-            self.inner.read_exact(padding)?;
-            if !buffer.iter().all(|b| *b == 0) {
-                return Err(Error::BadPadding);
-            }
-        }
-
-        Ok(data_buffer)
-    }
-
-    fn expect_tag(&mut self, tag: Tag) -> Result<()> {
-        if self.read_utf8_padded()? == tag.into_str() {
-            Ok(())
-        } else {
-            Err(Error::MissingTag(tag))
-        }
-    }
-}
-
-impl<R> Debug for Archive<R> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        fmt.debug_struct(stringify!(Archive))
-            .field("canonicalize_mtime", &self.canonicalize_mtime)
-            .field("remove_xattrs", &self.remove_xattrs)
-            .field("position", &self.inner.position)
-            .finish()
-    }
-}
-
-async fn parse(mut co: Co<'_>, archive: &mut Archive<dyn Read + '_>) {
-    if let Err(err) = try_parse(&mut co, archive, PathBuf::new()).await {
-        co.yield_(Err(err)).await;
     }
 }
 
@@ -274,7 +246,7 @@ async fn parse(mut co: Co<'_>, archive: &mut Archive<dyn Read + '_>) {
 struct LookAhead(Option<String>);
 
 impl LookAhead {
-    pub fn fetch_from(&mut self, archive: &mut Archive<dyn Read + '_>) -> Result<()> {
+    pub fn fetch_from(&mut self, archive: &mut ArchiveInner<dyn Read + '_>) -> Result<()> {
         assert_eq!(self.0, None);
         self.0 = Some(archive.read_utf8_padded()?);
         Ok(())
@@ -300,8 +272,9 @@ impl LookAhead {
 }
 
 async fn try_parse(
-    co: &mut Co<'_>,
-    mut archive: &mut Archive<dyn Read + '_>,
+    co: &mut Co,
+    params: Parameters,
+    mut archive: &mut ArchiveInner<dyn Read + '_>,
     path: PathBuf,
 ) -> Result<()> {
     archive.expect_tag(Tag::Open)?;
@@ -327,11 +300,11 @@ async fn try_parse(
 
             archive.expect_tag(Tag::Close)?;
 
-            co.yield_(Ok(Entry::new(
+            co.yield_(Ok(Entry {
                 path,
-                EntryKind::Regular { executable, data },
-                archive,
-            )))
+                kind: EntryKind::Regular { executable, data },
+                params,
+            }))
             .await;
         }
         "symlink" => {
@@ -339,11 +312,11 @@ async fn try_parse(
             let target: PathBuf = archive.read_utf8_padded()?.into();
             archive.expect_tag(Tag::Close)?;
 
-            co.yield_(Ok(Entry::new(path, EntryKind::Symlink { target }, archive)))
+            co.yield_(Ok(Entry { path, kind: EntryKind::Symlink { target }, params }))
                 .await;
         }
         "directory" => {
-            co.yield_(Ok(Entry::new(path.clone(), EntryKind::Directory, archive)))
+            co.yield_(Ok(Entry { path: path.clone(), kind: EntryKind::Directory, params } ))
                 .await;
 
             loop {
@@ -367,7 +340,7 @@ async fn try_parse(
                         archive.expect_tag(Tag::Node)?;
 
                         let child_entry: Pin<Box<dyn Future<Output = _>>> =
-                            Box::pin(try_parse(co, archive, path.join(entry_name)));
+                            Box::pin(try_parse(co, params, archive, path.join(entry_name)));
                         child_entry.await?;
 
                         archive.expect_tag(Tag::Close)?;
@@ -383,28 +356,17 @@ async fn try_parse(
     Ok(())
 }
 
-pub struct Entry<'a> {
-    name: PathBuf,
+#[derive(Debug)]
+pub struct Entry {
+    path: PathBuf,
     kind: EntryKind,
-    canonicalize_mtime: bool,
-    remove_xattrs: bool,
-    _marker: PhantomData<&'a ()>,
+    pub params: Parameters,
 }
 
-impl<'a> Entry<'a> {
-    fn new(name: PathBuf, kind: EntryKind, archive: &Archive<dyn Read + '_>) -> Self {
-        Entry {
-            name,
-            kind,
-            canonicalize_mtime: archive.canonicalize_mtime,
-            remove_xattrs: archive.remove_xattrs,
-            _marker: PhantomData,
-        }
-    }
-
+impl Entry {
     #[inline]
     pub fn name(&self) -> &Path {
-        &self.name
+        &self.path
     }
 
     #[inline]
@@ -439,20 +401,12 @@ impl<'a> Entry<'a> {
         }
     }
 
-    pub fn set_canonicalize_mtime(&mut self, canonicalize: bool) {
-        self.canonicalize_mtime = canonicalize;
-    }
-
-    pub fn set_remove_xattrs(&mut self, remove: bool) {
-        self.remove_xattrs = remove;
-    }
-
     pub fn unpack_in<P: AsRef<Path>>(&mut self, dst: P) -> Result<()> {
         let dst = dst.as_ref();
-        let path = if self.name.as_os_str().is_empty() {
+        let path = if self.path.as_os_str().is_empty() {
             dst.to_owned()
         } else {
-            dst.join(&self.name)
+            dst.join(&self.path)
         };
 
         for component in path.components() {
@@ -467,7 +421,7 @@ impl<'a> Entry<'a> {
         // we unpack, whether we choose to canonicalize as well or not.
         let recanonicalize_parent = path
             .parent()
-            .filter(|_| !self.name.as_os_str().is_empty())
+            .filter(|_| !self.path.as_os_str().is_empty())
             .and_then(|p| fs::symlink_metadata(p).ok())
             .filter(|m| {
                 FileTime::from_creation_time(&m)
@@ -481,14 +435,14 @@ impl<'a> Entry<'a> {
             EntryKind::Symlink { target } => Self::unpack_symlink(&path, target),
         }.map_err(|inner| Error::IoAt { inner, path: path.clone() })?;
 
-        if self.remove_xattrs {
+        if self.params.remove_xattrs {
             #[cfg(all(unix, feature = "xattr"))]
             for attr in xattr::list(&path)? {
                 xattr::remove(&path, attr)?;
             }
         }
 
-        if self.canonicalize_mtime {
+        if self.params.canonicalize_mtime {
             let metadata = fs::symlink_metadata(&path)?;
             let atime = FileTime::from_last_access_time(&metadata);
             filetime::set_symlink_file_times(&path, atime, FileTime::zero())?;
@@ -540,15 +494,6 @@ impl<'a> Entry<'a> {
     }
 }
 
-impl<'a> Debug for Entry<'a> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        fmt.debug_struct(stringify!(Entry))
-            .field("name", &self.name)
-            .field("kind", &self.kind)
-            .finish()
-    }
-}
-
 enum EntryKind {
     Directory,
     Regular { executable: bool, data: Vec<u8> },
@@ -559,7 +504,7 @@ impl From<EntryKind> for Tag {
     fn from(ek: EntryKind) -> Tag {
         match ek {
             EntryKind::Directory => Tag::Directory,
-            EntryKind::Regular { .. } => Tag::Regular,
+            EntryKind::Regular { executable, .. } => if executable { Tag::Executable } else { Tag::Regular },
             EntryKind::Symlink { .. } => Tag::Symlink,
         }
     }
