@@ -9,5 +9,7 @@ fn main() {
     libnar::to_writer(&mut file, TARGET_PATH).unwrap();
 
     let file = File::open(&nar).unwrap();
-    libnar::de::Parameters::new().unpack(file, "libnar").unwrap();
+    libnar::de::Parameters::new()
+        .unpack(file, "libnar")
+        .unwrap();
 }

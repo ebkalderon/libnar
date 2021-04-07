@@ -129,14 +129,9 @@ pub enum Error {
     InvalidDirEntry,
     UnknownFileType(String),
 
-    InvalidPathComponent {
-        path: PathBuf,
-    },
+    InvalidPathComponent { path: PathBuf },
     Io(io::Error),
-    IoAt {
-        inner: io::Error,
-        path: PathBuf,
-    },
+    IoAt { inner: io::Error, path: PathBuf },
     Utf8(std::string::FromUtf8Error),
 }
 
@@ -181,9 +176,16 @@ impl fmt::Display for Error {
 
             E::UnknownFileType(ft) => write!(f, "Unrecognized file type `{}`", ft),
 
-            E::InvalidPathComponent { path } => write!(f, "Invalid path component in {}", path.display()),
+            E::InvalidPathComponent { path } => {
+                write!(f, "Invalid path component in {}", path.display())
+            }
             E::Io(e) => write!(f, "I/O error: {}", e),
-            E::IoAt { inner, path } => write!(f, "I/O error: {}; while handling: {}", inner, path.display()),
+            E::IoAt { inner, path } => write!(
+                f,
+                "I/O error: {}; while handling: {}",
+                inner,
+                path.display()
+            ),
             E::Utf8(e) => write!(f, "Utf8 error: {}", e),
         }
     }
@@ -220,12 +222,17 @@ impl Parameters {
         }
     }
 
-    pub fn entries<'a, R: Read + 'a>(self, reader: R) -> Result<impl Iterator<Item = Result<Entry>> + 'a> {
+    pub fn entries<'a, R: Read + 'a>(
+        self,
+        reader: R,
+    ) -> Result<impl Iterator<Item = Result<Entry>> + 'a> {
         let mut reader = ArchiveInner {
             position: 0,
             reader,
         };
-        if ((&mut reader) as &mut ArchiveInner<dyn Read + 'a>).read_bytes_padded()? != NIX_VERSION_MAGIC {
+        if ((&mut reader) as &mut ArchiveInner<dyn Read + 'a>).read_bytes_padded()?
+            != NIX_VERSION_MAGIC
+        {
             Err(Error::InvalidMagic)
         } else {
             Ok(Gen::new(move |co| self.parse_all(co, reader)).into_iter())
@@ -312,12 +319,20 @@ async fn try_parse(
             let target: PathBuf = archive.read_utf8_padded()?.into();
             archive.expect_tag(Tag::Close)?;
 
-            co.yield_(Ok(Entry { path, kind: EntryKind::Symlink { target }, params }))
-                .await;
+            co.yield_(Ok(Entry {
+                path,
+                kind: EntryKind::Symlink { target },
+                params,
+            }))
+            .await;
         }
         "directory" => {
-            co.yield_(Ok(Entry { path: path.clone(), kind: EntryKind::Directory, params } ))
-                .await;
+            co.yield_(Ok(Entry {
+                path: path.clone(),
+                kind: EntryKind::Directory,
+                params,
+            }))
+            .await;
 
             loop {
                 match archive.read_utf8_padded()?.as_str() {
@@ -410,10 +425,11 @@ impl Entry {
         };
 
         for component in path.components() {
-            if matches!(component, Component::Prefix(_) | Component::RootDir | Component::ParentDir) {
-                return Err(Error::InvalidPathComponent {
-                    path,
-                });
+            if matches!(
+                component,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            ) {
+                return Err(Error::InvalidPathComponent { path });
             }
         }
 
@@ -433,7 +449,11 @@ impl Entry {
             EntryKind::Directory => Self::unpack_dir(&path),
             EntryKind::Regular { executable, data } => Self::unpack_file(&path, *executable, data),
             EntryKind::Symlink { target } => Self::unpack_symlink(&path, target),
-        }.map_err(|inner| Error::IoAt { inner, path: path.clone() })?;
+        }
+        .map_err(|inner| Error::IoAt {
+            inner,
+            path: path.clone(),
+        })?;
 
         if self.params.remove_xattrs {
             #[cfg(all(unix, feature = "xattr"))]
@@ -504,7 +524,13 @@ impl From<EntryKind> for Tag {
     fn from(ek: EntryKind) -> Tag {
         match ek {
             EntryKind::Directory => Tag::Directory,
-            EntryKind::Regular { executable, .. } => if executable { Tag::Executable } else { Tag::Regular },
+            EntryKind::Regular { executable, .. } => {
+                if executable {
+                    Tag::Executable
+                } else {
+                    Tag::Regular
+                }
+            }
             EntryKind::Symlink { .. } => Tag::Symlink,
         }
     }
