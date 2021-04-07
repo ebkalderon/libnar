@@ -1,4 +1,3 @@
-use std::cell::{Cell, RefCell};
 use std::fmt::{self, Debug, Formatter};
 use std::fs::{self, OpenOptions};
 use std::future::Future;
@@ -17,38 +16,38 @@ type Co<'a> = genawaiter::sync::Co<io::Result<Entry<'a>>>;
 
 #[derive(Debug)]
 struct ArchiveInner<R: ?Sized> {
-    canonicalize_mtime: bool,
-    remove_xattrs: bool,
-    position: Cell<u64>,
-    reader: RefCell<R>,
+    position: u64,
+    reader: R,
 }
 
-impl<'a, R: ?Sized + Read> Read for &'a ArchiveInner<R> {
+impl<R: ?Sized + Read> Read for ArchiveInner<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let bytes_read = self.reader.borrow_mut().read(buf)?;
-        self.position.set(self.position.get() + bytes_read as u64);
+        let bytes_read = self.reader.read(buf)?;
+        self.position += bytes_read as u64;
         Ok(bytes_read)
     }
 }
 
 pub struct Archive<R: ?Sized + Read> {
+    canonicalize_mtime: bool,
+    remove_xattrs: bool,
     inner: ArchiveInner<R>,
 }
 
 impl<R: Read> Archive<R> {
     pub fn new(reader: R) -> Self {
         Archive {
+            canonicalize_mtime: true,
+            remove_xattrs: true,
             inner: ArchiveInner {
-                canonicalize_mtime: true,
-                remove_xattrs: true,
-                position: Cell::new(0),
-                reader: RefCell::new(reader),
+                position: 0,
+                reader,
             },
         }
     }
 
     pub fn into_inner(self) -> R {
-        self.inner.reader.into_inner()
+        self.inner.reader
     }
 
     pub fn entries(&mut self) -> io::Result<Entries<R>> {
@@ -60,11 +59,11 @@ impl<R: Read> Archive<R> {
     }
 
     pub fn set_canonicalize_mtime(&mut self, canonicalize: bool) {
-        self.inner.canonicalize_mtime = canonicalize;
+        self.canonicalize_mtime = canonicalize;
     }
 
     pub fn set_remove_xattrs(&mut self, remove: bool) {
-        self.inner.remove_xattrs = remove;
+        self.remove_xattrs = remove;
     }
 
     pub fn unpack<P: AsRef<Path>>(&mut self, dst: P) -> io::Result<()> {
@@ -75,7 +74,7 @@ impl<R: Read> Archive<R> {
 
 impl<'a> Archive<dyn Read + 'a> {
     fn entries_inner(&mut self) -> io::Result<Box<dyn Iterator<Item = io::Result<Entry>> + '_>> {
-        if self.inner.position.get() != 0 {
+        if self.inner.position != 0 {
             let message = "Cannot call `entries` unless reader is in position 0";
             return Err(Error::new(ErrorKind::Other, message));
         }
@@ -96,24 +95,24 @@ impl<'a> Archive<dyn Read + 'a> {
         Ok(())
     }
 
-    fn read_utf8_padded(&self) -> io::Result<String> {
+    fn read_utf8_padded(&mut self) -> io::Result<String> {
         let bytes = self.read_bytes_padded()?;
         String::from_utf8(bytes).map_err(|e| Error::new(ErrorKind::InvalidData, e))
     }
 
-    fn read_bytes_padded(&self) -> io::Result<Vec<u8>> {
+    fn read_bytes_padded(&mut self) -> io::Result<Vec<u8>> {
         let mut len_buffer = [0u8; PAD_LEN];
-        (&self.inner).read_exact(&mut len_buffer[..])?;
+        self.inner.read_exact(&mut len_buffer[..])?;
         let len = u64::from_le_bytes(len_buffer);
 
         let mut data_buffer = vec![0u8; len as usize];
-        (&self.inner).read_exact(&mut data_buffer)?;
+        self.inner.read_exact(&mut data_buffer)?;
 
         let remainder = data_buffer.len() % PAD_LEN;
         if remainder > 0 {
             let mut buffer = [0u8; PAD_LEN];
             let padding = &mut buffer[0..PAD_LEN - remainder];
-            (&self.inner).read_exact(padding)?;
+            self.inner.read_exact(padding)?;
             if !buffer.iter().all(|b| *b == 0) {
                 return Err(Error::new(ErrorKind::Other, "Bad archive padding"));
             }
@@ -126,14 +125,14 @@ impl<'a> Archive<dyn Read + 'a> {
 impl<'a, R: Read> Debug for Archive<R> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         fmt.debug_struct(stringify!(Archive))
-            .field("canonicalize_mtime", &self.inner.canonicalize_mtime)
-            .field("remove_xattrs", &self.inner.remove_xattrs)
+            .field("canonicalize_mtime", &self.canonicalize_mtime)
+            .field("remove_xattrs", &self.remove_xattrs)
             .field("position", &self.inner.position)
             .finish()
     }
 }
 
-async fn parse(mut co: Co<'_>, archive: &Archive<dyn Read + '_>) {
+async fn parse(mut co: Co<'_>, archive: &mut Archive<dyn Read + '_>) {
     if let Err(err) = try_parse(&mut co, archive, PathBuf::new()).await {
         co.yield_(Err(err)).await;
     }
@@ -141,7 +140,7 @@ async fn parse(mut co: Co<'_>, archive: &Archive<dyn Read + '_>) {
 
 async fn try_parse(
     co: &mut Co<'_>,
-    archive: &Archive<dyn Read + '_>,
+    archive: &mut Archive<dyn Read + '_>,
     path: PathBuf,
 ) -> io::Result<()> {
     if archive.read_utf8_padded()? != "(" {
@@ -286,8 +285,8 @@ impl<'a> Entry<'a> {
         Entry {
             name,
             kind,
-            canonicalize_mtime: archive.inner.canonicalize_mtime,
-            remove_xattrs: archive.inner.remove_xattrs,
+            canonicalize_mtime: archive.canonicalize_mtime,
+            remove_xattrs: archive.remove_xattrs,
             _marker: PhantomData,
         }
     }
