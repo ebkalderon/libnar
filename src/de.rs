@@ -28,7 +28,7 @@ impl<R: ?Sized + Read> Read for ArchiveInner<R> {
     }
 }
 
-pub struct Archive<R: ?Sized + Read> {
+pub struct Archive<R: ?Sized> {
     canonicalize_mtime: bool,
     remove_xattrs: bool,
     inner: ArchiveInner<R>,
@@ -50,12 +50,9 @@ impl<R: Read> Archive<R> {
         self.inner.reader
     }
 
-    pub fn entries(&mut self) -> io::Result<Entries<R>> {
+    pub fn entries(&mut self) -> io::Result<impl Iterator<Item = io::Result<Entry>> + '_> {
         let archive: &mut Archive<dyn Read> = self;
-        archive.entries_inner().map(|iter| Entries {
-            iter,
-            _marker: PhantomData,
-        })
+        archive.entries_inner()
     }
 
     pub fn set_canonicalize_mtime(&mut self, canonicalize: bool) {
@@ -73,7 +70,7 @@ impl<R: Read> Archive<R> {
 }
 
 impl<'a> Archive<dyn Read + 'a> {
-    fn entries_inner(&mut self) -> io::Result<Box<dyn Iterator<Item = io::Result<Entry>> + '_>> {
+    fn entries_inner(&mut self) -> io::Result<impl Iterator<Item = io::Result<Entry>> + '_> {
         if self.inner.position != 0 {
             let message = "Cannot call `entries` unless reader is in position 0";
             return Err(Error::new(ErrorKind::Other, message));
@@ -83,8 +80,7 @@ impl<'a> Archive<dyn Read + 'a> {
             return Err(Error::new(ErrorKind::Other, "Not a valid NAR archive"));
         }
 
-        let gen = Gen::new(move |co| parse(co, self));
-        Ok(Box::new(gen.into_iter()))
+        Ok(Gen::new(move |co| parse(co, self)).into_iter())
     }
 
     fn unpack_inner(&mut self, dst: &Path) -> io::Result<()> {
@@ -122,7 +118,7 @@ impl<'a> Archive<dyn Read + 'a> {
     }
 }
 
-impl<'a, R: Read> Debug for Archive<R> {
+impl<R> Debug for Archive<R> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         fmt.debug_struct(stringify!(Archive))
             .field("canonicalize_mtime", &self.canonicalize_mtime)
@@ -251,25 +247,6 @@ async fn try_parse(
     }
 
     Ok(())
-}
-
-pub struct Entries<'a, R: 'a + Read> {
-    iter: Box<dyn Iterator<Item = io::Result<Entry<'a>>> + 'a>,
-    _marker: PhantomData<&'a Archive<R>>,
-}
-
-impl<'a, R: Read> Iterator for Entries<'a, R> {
-    type Item = io::Result<Entry<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
-    }
-}
-
-impl<'a, R: Read> Debug for Entries<'a, R> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        write!(fmt, stringify!(Entries))
-    }
 }
 
 pub struct Entry<'a> {
