@@ -12,32 +12,22 @@ fn serializes_regular_file() {
         .chain(
             13u64
                 .to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"nix-archive-1")
                 .chain(&[0u8; 3]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            7u64.to_le_bytes()
-                .into_iter()
-                .chain(b"regular")
-                .chain(&[0u8; 1]),
-        )
-        .chain(8u64.to_le_bytes().into_iter().chain(b"contents"))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
+        .chain(7u64.to_le_bytes().iter().chain(b"regular").chain(&[0u8; 1]))
+        .chain(8u64.to_le_bytes().iter().chain(b"contents"))
         .chain(
             27u8.to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(&[0u8; 7])
                 .chain("lorem ipsum dolor sic amet\n".as_bytes())
                 .chain(&[0u8; 5]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
         .copied()
         .collect();
 
@@ -61,40 +51,30 @@ fn serializes_executable_file() {
         .chain(
             13u64
                 .to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"nix-archive-1")
                 .chain(&[0u8; 3]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            7u64.to_le_bytes()
-                .into_iter()
-                .chain(b"regular")
-                .chain(&[0u8; 1]),
-        )
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
+        .chain(7u64.to_le_bytes().iter().chain(b"regular").chain(&[0u8; 1]))
         .chain(
             10u8.to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(&[0u8; 7])
                 .chain(b"executable")
                 .chain(&[0u8; 5]),
         )
-        .chain(0u8.to_le_bytes().into_iter().chain(b"").chain(&[0u8; 8]))
-        .chain(8u64.to_le_bytes().into_iter().chain(b"contents"))
+        .chain(0u8.to_le_bytes().iter().chain(b"").chain(&[0u8; 8]))
+        .chain(8u64.to_le_bytes().iter().chain(b"contents"))
         .chain(
             35u8.to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(&[0u8; 7])
                 .chain("#!/bin/sh\nset -euo pipefail\nexit 0\n".as_bytes())
                 .chain(&[0u8; 5]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
         .copied()
         .collect();
 
@@ -111,36 +91,16 @@ fn serializes_symlink() {
         .chain(
             13u64
                 .to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"nix-archive-1")
                 .chain(&[0u8; 3]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            7u64.to_le_bytes()
-                .into_iter()
-                .chain(b"symlink")
-                .chain(&[0u8; 1]),
-        )
-        .chain(
-            6u64.to_le_bytes()
-                .into_iter()
-                .chain(b"target")
-                .chain(&[0u8; 2]),
-        )
-        .chain(
-            5u64.to_le_bytes()
-                .into_iter()
-                .chain(b"./foo")
-                .chain(&[0u8; 3]),
-        )
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
+        .chain(7u64.to_le_bytes().iter().chain(b"symlink").chain(&[0u8; 1]))
+        .chain(6u64.to_le_bytes().iter().chain(b"target").chain(&[0u8; 2]))
+        .chain(5u64.to_le_bytes().iter().chain(b"./foo").chain(&[0u8; 3]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
         .copied()
         .collect();
 
@@ -158,112 +118,52 @@ fn serializes_directory() {
         .chain(
             13u64
                 .to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"nix-archive-1")
                 .chain(&[0u8; 3]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
         .chain(
             9u64.to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"directory")
                 .chain(&[0u8; 7]),
         )
-        .chain(
-            5u64.to_le_bytes()
-                .into_iter()
-                .chain(b"entry")
-                .chain(&[0u8; 3]),
-        )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"name")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            6u64.to_le_bytes()
-                .into_iter()
-                .chain(b"subdir")
-                .chain(&[0u8; 2]),
-        )
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"node")
-                .chain(&[0u8; 4]),
-        )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
+        .chain(5u64.to_le_bytes().iter().chain(b"entry").chain(&[0u8; 3]))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"name").chain(&[0u8; 4]))
+        .chain(6u64.to_le_bytes().iter().chain(b"subdir").chain(&[0u8; 2]))
+        .chain(4u64.to_le_bytes().iter().chain(b"node").chain(&[0u8; 4]))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
         .chain(
             9u64.to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain(b"directory")
                 .chain(&[0u8; 7]),
         )
-        .chain(
-            5u64.to_le_bytes()
-                .into_iter()
-                .chain(b"entry")
-                .chain(&[0u8; 3]),
-        )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"name")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"file")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"node")
-                .chain(&[0u8; 4]),
-        )
-        .chain(1u64.to_le_bytes().into_iter().chain(b"(").chain(&[0u8; 7]))
-        .chain(
-            4u64.to_le_bytes()
-                .into_iter()
-                .chain(b"type")
-                .chain(&[0u8; 4]),
-        )
-        .chain(
-            7u64.to_le_bytes()
-                .into_iter()
-                .chain(b"regular")
-                .chain(&[0u8; 1]),
-        )
-        .chain(8u64.to_le_bytes().into_iter().chain(b"contents"))
+        .chain(5u64.to_le_bytes().iter().chain(b"entry").chain(&[0u8; 3]))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"name").chain(&[0u8; 4]))
+        .chain(4u64.to_le_bytes().iter().chain(b"file").chain(&[0u8; 4]))
+        .chain(4u64.to_le_bytes().iter().chain(b"node").chain(&[0u8; 4]))
+        .chain(1u64.to_le_bytes().iter().chain(b"(").chain(&[0u8; 7]))
+        .chain(4u64.to_le_bytes().iter().chain(b"type").chain(&[0u8; 4]))
+        .chain(7u64.to_le_bytes().iter().chain(b"regular").chain(&[0u8; 1]))
+        .chain(8u64.to_le_bytes().iter().chain(b"contents"))
         .chain(
             11u64
                 .to_le_bytes()
-                .into_iter()
+                .iter()
                 .chain("hello world".as_bytes())
                 .chain(&[0u8; 5]),
         )
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
-        .chain(1u64.to_le_bytes().into_iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
+        .chain(1u64.to_le_bytes().iter().chain(b")").chain(&[0u8; 7]))
         .copied()
         .collect();
 
