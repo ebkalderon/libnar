@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
 #[doc(inline)]
-pub use self::de::Archive;
-#[doc(inline)]
 pub use self::ser::{to_vec, to_writer};
 
 const NIX_VERSION_MAGIC: &[u8] = b"nix-archive-1";
